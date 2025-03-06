@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { socket } from "@/lib/socket";
-import { useToast } from '@/context/ToastContext';
+import { useToast } from "@/context/ToastContext";
 
-import { ArrowLeft, Users, Clock, Trophy } from "lucide-react";
+import { ArrowLeft, Users, Clock } from "lucide-react";
+
+// Importar os novos componentes
+import ProgressTimer from "@/components/ProgressTimer";
+import Button from "@/components/Button";
+import PlayerList from "@/components/PlayerList";
+import AnimatedQuestion from "@/components/AnimatedQuestion";
+import EnhancedResults from "@/components/EnhancedResults";
+import Confetti from "@/components/Confetti";
+import AnswerFeedback from "@/components/AnswerFeedback";
+import useCountdown from "@/hooks/useCountdown";
 
 const JoinRoom = ({ setCurrentPage, username }) => {
 	const { showSuccess, showError, showInfo } = useToast();
@@ -16,11 +26,25 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 	const [totalQuestions, setTotalQuestions] = useState(0);
 	const [selectedOption, setSelectedOption] = useState(null);
 	const [hasAnswered, setHasAnswered] = useState(false);
-	const [countdown, setCountdown] = useState(null);
-	const [countdownInterval, setCountdownInterval] = useState(null);
 	const [questionResults, setQuestionResults] = useState(null);
 	const [gameResults, setGameResults] = useState(null);
 	const [players, setPlayers] = useState([]);
+	const [loading, setLoading] = useState(false);
+	const [showFeedback, setShowFeedback] = useState(false);
+	const [correctOptionIndex, setCorrectOptionIndex] = useState(null);
+	const [showConfetti, setShowConfetti] = useState(false);
+
+	// Usar o hook personalizado para o contador
+	const {
+		seconds: countdown,
+		start: startCountdown,
+		percentageLeft,
+	} = useCountdown(60, () => {
+		// O tempo acabou e o jogador não respondeu
+		if (step === "playing" && !hasAnswered) {
+			showInfo("Tempo esgotado!");
+		}
+	});
 
 	useEffect(() => {
 		// Evento para quando entrar na sala com sucesso
@@ -29,6 +53,7 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			setRoomInfo(data);
 			setPlayers(data.players);
 			setStep("waiting");
+			setLoading(false);
 		};
 
 		// Evento para quando um jogador entra na sala
@@ -39,7 +64,7 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 
 		// Evento para quando um jogador sai da sala
 		const handlePlayerLeft = (data) => {
-			showInfo(`${data.playerName} saiu da sala`);
+			showInfo(`Um jogador saiu da sala`);
 			setPlayers(data.players);
 		};
 
@@ -52,6 +77,7 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			setHasAnswered(false);
 			setSelectedOption(null);
 			setQuestionResults(null);
+			setShowFeedback(false);
 
 			// Iniciar contagem regressiva
 			startCountdown(data.timeLimit || 60);
@@ -63,11 +89,16 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			setStep("results");
 			setQuestionResults(data);
 			setPlayers(data.playerScores);
+			setCorrectOptionIndex(data.correctOptionIndex);
 
-			// Parar contagem regressiva
-			if (countdownInterval) {
-				clearInterval(countdownInterval);
-				setCountdownInterval(null);
+			// Mostrar feedback visual da resposta
+			if (selectedOption !== null) {
+				setShowFeedback(true);
+
+				// Ocultar o feedback após alguns segundos
+				setTimeout(() => {
+					setShowFeedback(false);
+				}, 2500);
 			}
 		};
 
@@ -82,12 +113,7 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			console.log("Fim de jogo:", data);
 			setStep("finished");
 			setGameResults(data);
-
-			// Limpar contagem regressiva
-			if (countdownInterval) {
-				clearInterval(countdownInterval);
-				setCountdownInterval(null);
-			}
+			setShowConfetti(true);
 		};
 
 		// Evento para sala fechada (quando o host sai)
@@ -101,6 +127,7 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			console.error("Erro:", data.message);
 			showError(data.message);
 			setError(data.message);
+			setLoading(false);
 			setTimeout(() => setError(""), 3000);
 		};
 
@@ -126,35 +153,15 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			socket.off("game_over", handleGameOver);
 			socket.off("room_closed", handleRoomClosed);
 			socket.off("error", handleError);
-
-			if (countdownInterval) {
-				clearInterval(countdownInterval);
-			}
 		};
-	}, [countdownInterval, setCurrentPage]);
-
-	// Função para iniciar contagem regressiva
-	const startCountdown = (seconds) => {
-		// Limpar qualquer intervalo existente
-		if (countdownInterval) {
-			clearInterval(countdownInterval);
-		}
-
-		setCountdown(seconds);
-
-		const interval = setInterval(() => {
-			setCountdown((prev) => {
-				if (prev <= 1) {
-					clearInterval(interval);
-					setCountdownInterval(null);
-					return 0;
-				}
-				return prev - 1;
-			});
-		}, 1000);
-
-		setCountdownInterval(interval);
-	};
+	}, [
+		setCurrentPage,
+		showError,
+		showInfo,
+		showSuccess,
+		selectedOption,
+		startCountdown,
+	]);
 
 	// Função para entrar na sala
 	const handleJoinRoom = (e) => {
@@ -165,6 +172,7 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 			return;
 		}
 
+		setLoading(true);
 		socket.emit("join_room", {
 			roomId: roomCode.trim().toUpperCase(),
 			playerName: username,
@@ -175,11 +183,15 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 	const handleSubmitAnswer = (optionIndex) => {
 		if (hasAnswered) return;
 
-		socket.emit("submit_answer", {
-			optionIndex,
-		});
-
+		// Efeito visual de seleção
 		setSelectedOption(optionIndex);
+
+		// Pequeno delay para feedback visual antes de enviar
+		setTimeout(() => {
+			socket.emit("submit_answer", {
+				optionIndex,
+			});
+		}, 200);
 	};
 
 	// Função para voltar para a tela inicial
@@ -189,9 +201,20 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 
 	return (
 		<div className="w-full max-w-4xl mx-auto py-8 px-4">
+			{showConfetti && <Confetti />}
+
+			{/* Feedback visual para resposta */}
+			{showFeedback && correctOptionIndex !== null && (
+				<AnswerFeedback
+					correctOptionIndex={correctOptionIndex}
+					selectedOption={selectedOption}
+					questionResults={questionResults?.playerResults}
+				/>
+			)}
+
 			{/* Tela de entrada na sala */}
 			{step === "join" && (
-				<div className="flex flex-col gap-6 items-center">
+				<div className="flex flex-col gap-6 items-center animate-in fade-in">
 					<div className="flex items-center justify-between w-full">
 						<button
 							onClick={handleBackToHome}
@@ -202,13 +225,12 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 						<h1 className="text-3xl font-bold text-center text-white">
 							Entrar em Sala
 						</h1>
-						<div className="w-10"></div>{" "}
-						{/* Espaçador para centralizar título */}
+						<div className="w-10"></div>
 					</div>
 
 					<form
 						onSubmit={handleJoinRoom}
-						className="flex flex-col gap-4 w-full max-w-md"
+						className="flex flex-col gap-4 w-full max-w-md animate-in slide-in-from-bottom"
 					>
 						<div className="flex flex-col gap-2">
 							<label className="text-white">Código da Sala</label>
@@ -235,22 +257,25 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 						</div>
 
 						{error && (
-							<p className="text-rose-400 text-center">{error}</p>
+							<p className="text-rose-400 text-center animate-in fade-in">
+								{error}
+							</p>
 						)}
 
-						<button
+						<Button
 							type="submit"
-							className="w-full bg-rose-500 hover:bg-rose-600 text-white py-3 rounded-lg font-semibold mt-2 transition"
+							loading={loading}
+							className="w-full mt-2"
 						>
 							Entrar na Sala
-						</button>
+						</Button>
 					</form>
 				</div>
 			)}
 
 			{/* Tela de espera */}
 			{step === "waiting" && roomInfo && (
-				<div className="flex flex-col gap-6 items-center">
+				<div className="flex flex-col gap-6 items-center animate-in fade-in">
 					<div className="flex items-center justify-between w-full">
 						<button
 							onClick={handleBackToHome}
@@ -261,11 +286,10 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 						<h1 className="text-3xl font-bold text-center text-white">
 							{roomInfo.quizTitle}
 						</h1>
-						<div className="w-10"></div>{" "}
-						{/* Espaçador para centralizar título */}
+						<div className="w-10"></div>
 					</div>
 
-					<div className="bg-white/10 p-6 rounded-xl w-full max-w-md">
+					<div className="bg-white/10 p-6 rounded-xl w-full max-w-md animate-in slide-in-from-top">
 						<div className="text-center">
 							<h2 className="text-xl text-white font-semibold mb-2">
 								Aguardando início
@@ -277,38 +301,11 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 						</div>
 					</div>
 
-					<div className="w-full max-w-md">
-						<div className="flex items-center gap-2 mb-2">
-							<Users size={18} className="text-white/70" />
-							<h3 className="text-white font-semibold">
-								Jogadores ({players.length})
-							</h3>
-						</div>
-
-						<div className="bg-white/5 rounded-lg overflow-hidden">
-							{players.map((player, index) => (
-								<div
-									key={player.id}
-									className={`
-                                        flex items-center justify-between p-4
-                                        ${
-											index < players.length - 1
-												? "border-b border-white/10"
-												: ""
-										}
-                                    `}
-								>
-									<span className="text-white">
-										{player.name}
-									</span>
-									{player.score > 0 && (
-										<span className="text-white/70 text-sm">
-											{player.score} pts
-										</span>
-									)}
-								</div>
-							))}
-						</div>
+					<div className="w-full max-w-md animate-in slide-in-from-bottom">
+						<PlayerList
+							players={players}
+							title="Jogadores na Sala"
+						/>
 					</div>
 				</div>
 			)}
@@ -326,101 +323,37 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 							</h1>
 						</div>
 
-						<div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-lg">
-							<Clock size={18} className="text-white/70" />
-							<span
-								className={`text-xl font-bold ${
-									countdown < 10
-										? "text-rose-500"
-										: "text-white"
-								}`}
-							>
-								{countdown}s
-							</span>
+						<div className="flex flex-col gap-2 bg-white/10 px-4 py-3 rounded-lg">
+							<div className="flex items-center gap-2">
+								<Clock size={18} className="text-white/70" />
+								<span
+									className={`text-xl font-bold ${
+										countdown < 10
+											? "text-rose-500"
+											: "text-white"
+									}`}
+								>
+									{countdown}s
+								</span>
+							</div>
+							<ProgressTimer
+								totalTime={60}
+								currentTime={countdown}
+							/>
 						</div>
 					</div>
 
-					{/* Grade de opções */}
-					<div className="grid grid-cols-2 gap-4">
-						{currentQuestion.options.map((option, index) => (
-							<button
-								key={index}
-								onClick={() => handleSubmitAnswer(index)}
-								disabled={hasAnswered}
-								className={`
-                                    relative rounded-xl overflow-hidden border-2 h-48
-                                    ${
-										hasAnswered
-											? "opacity-60"
-											: "hover:opacity-90 transition"
-									}
-                                    ${
-										selectedOption === index
-											? "ring-4 ring-white"
-											: ""
-									}
-                                `}
-								style={{
-									borderColor: [
-										"#E21B3C",
-										"#1368CE",
-										"#FFA602",
-										"#26890C",
-									][index],
-									cursor: hasAnswered ? "default" : "pointer",
-								}}
-							>
-								{option.image ? (
-									<div
-										className="w-full h-full bg-center bg-cover flex items-end justify-center"
-										style={{
-											backgroundImage: `url(${option.image})`,
-										}}
-									>
-										<div
-											className="w-full py-3 px-4 text-center text-white font-semibold"
-											style={{
-												backgroundColor: [
-													"#E21B3C",
-													"#1368CE",
-													"#FFA602",
-													"#26890C",
-												][index],
-											}}
-										>
-											{option.text}
-										</div>
-									</div>
-								) : (
-									<div
-										className="w-full h-full flex items-center justify-center"
-										style={{
-											backgroundColor: [
-												"#E21B3C",
-												"#1368CE",
-												"#FFA602",
-												"#26890C",
-											][index],
-											opacity: 0.8,
-										}}
-									>
-										<span className="text-white font-bold text-lg">
-											{option.text}
-										</span>
-									</div>
-								)}
-
-								{hasAnswered && selectedOption === index && (
-									<div className="absolute top-2 right-2 bg-white text-black font-bold text-sm p-1 px-2 rounded-full">
-										Sua resposta
-									</div>
-								)}
-							</button>
-						))}
-					</div>
+					{/* Componente de pergunta animado */}
+					<AnimatedQuestion
+						question={currentQuestion}
+						selectedOption={selectedOption}
+						hasAnswered={hasAnswered}
+						onSelectOption={handleSubmitAnswer}
+						countdown={countdown}
+					/>
 
 					{hasAnswered && (
-						<div className="bg-white/10 p-4 rounded-lg text-center text-white">
+						<div className="bg-green-500/20 p-4 rounded-lg text-center text-white animate-in fade-in">
 							<p>
 								Resposta enviada! Aguardando os outros
 								jogadores...
@@ -432,18 +365,18 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 
 			{/* Tela de resultados da pergunta */}
 			{step === "results" && questionResults && (
-				<div className="flex flex-col gap-6">
+				<div className="flex flex-col gap-6 animate-in fade-in">
 					<h1 className="text-2xl font-bold text-white text-center">
 						Resultados da Pergunta {questionResults.questionNumber}
 					</h1>
 
-					<div className="bg-white/10 p-6 rounded-xl">
+					<div className="bg-white/10 p-6 rounded-xl animate-in slide-in-from-bottom">
 						<div className="flex flex-col gap-4 items-center">
 							<div className="text-center">
 								<h2 className="text-xl text-white font-semibold">
 									Resposta Correta
 								</h2>
-								<p className="text-white/80 mt-1">
+								<p className="text-white/80 mt-1 text-lg font-medium">
 									{questionResults.correctOptionText}
 								</p>
 							</div>
@@ -452,35 +385,11 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 								<h3 className="text-white font-semibold mb-2">
 									Placar Atual
 								</h3>
-								<div className="bg-white/5 rounded-lg overflow-hidden">
-									{players
-										.slice(0, 5)
-										.map((player, index) => (
-											<div
-												key={player.id}
-												className={`
-                                                flex items-center justify-between p-3
-                                                ${
-													index < players.length - 1
-														? "border-b border-white/10"
-														: ""
-												}
-                                            `}
-											>
-												<div className="flex items-center gap-2">
-													<span className="w-5 h-5 flex items-center justify-center bg-white/20 rounded-full text-white text-xs">
-														{index + 1}
-													</span>
-													<span className="text-white">
-														{player.name}
-													</span>
-												</div>
-												<span className="text-white font-bold">
-													{player.score}
-												</span>
-											</div>
-										))}
-								</div>
+								<PlayerList
+									players={players.slice(0, 5)}
+									showRank={true}
+									title="Ranking"
+								/>
 							</div>
 						</div>
 					</div>
@@ -491,59 +400,17 @@ const JoinRoom = ({ setCurrentPage, username }) => {
 				</div>
 			)}
 
-			{/* Tela de fim de jogo */}
+			{/* Tela de fim de jogo com confetes */}
 			{step === "finished" && gameResults && (
-				<div className="flex flex-col gap-6 items-center">
-					<h1 className="text-3xl font-bold text-white">
-						Resultado Final
-					</h1>
+				<>
+					<EnhancedResults gameResults={gameResults} />
 
-					<div className="w-full max-w-md bg-white/10 rounded-xl overflow-hidden">
-						<div className="p-4 bg-rose-500 text-white font-bold text-center">
-							<Trophy size={24} className="inline-block mr-2" />
-							Ranking
-						</div>
-
-						{gameResults.ranking.map((player) => (
-							<div
-								key={player.id}
-								className="flex items-center justify-between p-4 border-b border-white/10 last:border-b-0"
-							>
-								<div className="flex items-center gap-3">
-									<span
-										className={`
-                                        w-8 h-8 rounded-full flex items-center justify-center font-bold
-                                        ${
-											player.rank === 1
-												? "bg-yellow-500 text-yellow-900"
-												: player.rank === 2
-												? "bg-gray-300 text-gray-800"
-												: player.rank === 3
-												? "bg-amber-700 text-amber-100"
-												: "bg-white/20 text-white"
-										}
-                                    `}
-									>
-										{player.rank}
-									</span>
-									<span className="text-white font-medium">
-										{player.name}
-									</span>
-								</div>
-								<span className="text-white font-bold">
-									{player.score} pts
-								</span>
-							</div>
-						))}
+					<div className="mt-8 flex justify-center">
+						<Button onClick={handleBackToHome} variant="secondary">
+							Voltar ao Lobby
+						</Button>
 					</div>
-
-					<button
-						onClick={handleBackToHome}
-						className="px-4 py-2 rounded-md bg-white/10 text-white hover:bg-white/20 transition"
-					>
-						Voltar ao Lobby
-					</button>
-				</div>
+				</>
 			)}
 		</div>
 	);

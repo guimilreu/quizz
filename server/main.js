@@ -419,7 +419,7 @@ function calculateScores(roomId) {
 	const currentQuestion = room.quiz.questions[questionIndex];
 
 	// Na estrutura do quiz fornecida, o índice 0 é a resposta correta
-	const correctAnswerIndex = 0;
+	const correctAnswerIndex = currentQuestion.correctOptionIndex;
 
 	// Obter as respostas para esta pergunta
 	const answers = room.answers[questionIndex] || [];
